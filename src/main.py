@@ -62,8 +62,6 @@ def get_number_of_messages_today(
                              if float(message['ts']) >= ts_24h_ago]
         return len(messages_last_24h)
 
-def post_message():
-    pass
 
 def post_message(channel, client: WebClient, **kwargs):
     try:
