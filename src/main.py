@@ -39,9 +39,8 @@ def get_channel_list(
         logger.error(f'Error fetching conversations: {e}')
 
 
-def calc_stats():
-    pass
-
+def join_to_channel(channel_id, client: WebClient):
+    client.conversations_join(channel=channel_id)
 
 def compose_message():
     pass
