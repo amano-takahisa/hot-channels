@@ -42,9 +42,25 @@ def get_channel_list(
 def join_to_channel(channel_id, client: WebClient):
     client.conversations_join(channel=channel_id)
 
-def compose_message():
-    pass
 
+def get_number_of_messages_today(
+        channel_id: str,
+        client: WebClient) -> int:
+    """
+    Because pagination is not yet supported, 100 is returned if the number of
+    messages is 100 or more.
+    """
+    try:
+        # Call the conversations.history method using the WebClient
+        # conversations.history returns the first 100 messages by default
+        # These results are paginated,
+        # see: https://api.slack.com/methods/conversations.history$pagination
+        result = client.conversations_history(channel=channel_id)
+        messages: List[Dict[str, Any]] = result.get('messages')  # type: ignore
+        ts_24h_ago = (datetime.today() - timedelta(days=1)).timestamp()
+        messages_last_24h = [message for message in messages
+                             if float(message['ts']) >= ts_24h_ago]
+        return len(messages_last_24h)
 
 def post_message():
     pass
