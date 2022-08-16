@@ -30,8 +30,9 @@ class ChannelMeta(NamedTuple):
     id: str
     is_member: bool
     name: str
-    topick_value: str
+    topic_value: str
     purpose_value: str
+    num_members: int
 
 
 def get_channel_metas(
@@ -48,8 +49,9 @@ def get_channel_metas(
                 id=c['id'],
                 name=c['name'],
                 is_member=c['is_member'],
-                topick_value=c['topic']['value'],
-                purpose_value=c['purpose']['value'])
+                topic_value=c['topic']['value'],
+                purpose_value=c['purpose']['value'],
+                num_members=c['num_members'])
             for c in result['channels'] if c['is_channel']]  # type: ignore
         return channel_metas
 
@@ -92,62 +94,67 @@ class MessageCount(NamedTuple):
     message_count: int
 
 
-def compose_message_blocks(
+def compose_blocks(
+    message_counts: List[MessageCount],
+    channel_metas: List[ChannelMeta]
+) -> List[Dict[str, Any]]:
+
+    total_messages = sum([mc.message_count for mc in message_counts])
+    header_blocks = [
+        {'type': 'header',
+         'text': {'type': 'plain_text',
+                  'text': ":star2: Today's Active Channel Rankings :star2:"}},
+        {'type': 'context',
+         'elements': [{'text': (f'{total_messages} messages were posted to '
+                                'the workspace today.'),
+                       'type': 'mrkdwn'}]},
+        {'type': 'divider'}
+    ]
+
+    stat_blocks = compose_stat_blocks(
+        message_counts=message_counts,
+        channel_metas=channel_metas)
+    return header_blocks + stat_blocks
+
+
+def compose_stat_blocks(
     message_counts: List[MessageCount],
     channel_metas: List[ChannelMeta]
 ) -> List[Dict[str, Any]]:
     n_channels = len(message_counts)
-    total_messages = sum([mc.message_count for mc in message_counts])
-    message_counts = sorted(message_counts,
+    message_counts = sorted(message_counts.copy(),
                             key=lambda item: getattr(item, 'message_count'),
                             reverse=True)
+
+    medals = [':first_place_medal:',
+              ':second_place_medal:',
+              ':third_place_medal:']
+    medals += [':tada:'] * (n_channels - len(medals))
+    medals = medals[:n_channels]
+
     stat_blocks = []
-    for idx, message_count in enumerate(message_counts):
-        if idx == 0:
-            icon = ':first_place_medal:'
+    for medal, message_count in zip(medals, message_counts):
+        num_message = message_count.message_count
+        channel_id = message_count.channel_id
+        channel_meta = [cm for cm in channel_metas if cm.id == channel_id][0]
+        channel_name = channel_meta.name
+        channel_members = channel_meta.num_members
+        channel_topic = channel_meta.topic_value
+        channel_purpose = channel_meta.purpose_value
 
-        else:
-            icon = ':tada:'
-        # stat_block = f'{icon} {idx + 1}. #{message_count.channel_name}'
+        stat_blocks.extend(
+            [
+                {
+                    'type': 'section', 'fields': [
+                        {
+                            "type": "mrkdwn", "text": f"{medal}  #{channel_name}"}, {
+                            'type': 'mrkdwn', 'text': (
+                                f':incoming_envelope: {num_message} :people_holding_hands: {channel_members}\n'
+                                f'{channel_topic}\n'
+                                f'{channel_purpose}')}]}, {
+                    "type": "divider"}])
 
-        # stat_blocks.append(stat_block)
-    # return stat_messages
-    blocks = [
-        {
-            "type": "header",
-            "text": {
-                "type": "plain_text",
-                "text": ":star2: Today's Active Channel Rankings :star2:"
-            }
-        },
-        {
-            "type": "section",
-            "fields": [
-                {
-                    "type": "mrkdwn",
-                    "text": ":first_place_medal: #general"
-                },
-                {
-                    "type": "mrkdwn",
-                    "text": "30 messagess today"
-                }
-            ]
-        },
-        {
-            "type": "context",
-            "elements": [
-                {
-                    "text": "xxxxx channel_topic here xxxxx",
-                    "type": "mrkdwn"
-                }
-            ]
-        },
-        {
-            "type": "divider"
-        }
-    ]
-
-    return blocks
+    return stat_blocks
 
 
 def post_message(channel, client: WebClient, **kwargs):
@@ -209,17 +216,19 @@ def main(*args, **kwargs):
             channel_meta for channel_meta in channel_metas
             if channel_meta.is_member]
 
-    pprint(channel_metas)
-    # Getch message counts
+    # Get message counts
     message_counts: List[MessageCount] = [
         MessageCount(channel_id=channel_meta.id,
                      message_count=get_number_of_messages_today(
                          channel_id=channel_meta.id, client=client))
         for channel_meta in channel_metas]
-    pprint(message_counts)
 
+    # compose block
+    message_blocks = compose_blocks(message_counts=message_counts,
+                                    channel_metas=channel_metas)
+
+    pprint(message_blocks)
     exit()
-    blocks = compose_message_blocks(message_counts=message_counts)
     # pprint(blocks)
     # post_message(
     #     channel=hot_channel_id,
