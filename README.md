@@ -13,6 +13,7 @@ https://github.com/slackapi/python-slack-sdk/tree/main/tutorial
         - channels:join (Bot needs to join to the channel to get number of messages.)
         - chat:write (To post ranking messages.)
         - channels:read (To get list of channels)
+        - chat:write.customize (To post messages with custom name and icon)
 3. Install the bot to your workspace from left side menu Setting > Install app > Install Workspace. 
 4. Copy Bot User OAuth Token which start from  `xoxb-`.
 
@@ -26,14 +27,15 @@ the `config.ini` file.
 pip install -r requirements.txt
 ```
 
+## Run the bot from your local
 Run following command. (Replace xoxb-... part to your bot user OAuth Token you copied.)
 ```bash
 SLACK_API_TOKEN=xoxb-... ./src/main.py
 ```
 ## Run the bot from Github Actions
+Add `SLACK_API_TOKEN` to Github Actions' secrets.
+From Settings > Secrets > Actions > New Repository secret, add `xoxb-...` code
+with the name `SLACK_API_TOKEN`.
 
-## add SLACK_API_TOKEN to env
 
-```bash
-export SLACK_API_TOKEN=xoxb-.....
-```
+

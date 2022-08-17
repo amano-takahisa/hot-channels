@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
-import re
-import json
-import os
-
-from datetime import datetime, timedelta
 import configparser
+import json
 import logging
-from pprint import pprint
-from slack_bolt import App
-from slack_sdk.web import WebClient
-from typing import List, Dict, Optional, Any, Union, NamedTuple
-from slack_sdk.errors import SlackApiError
+import os
+import re
+from datetime import datetime, timedelta
 from pathlib import Path
+from pprint import pprint
+from typing import Any, Dict, List, NamedTuple, Optional
+
+from slack_sdk.errors import SlackApiError
+from slack_sdk.web import WebClient
 
 logger = logging.getLogger(__name__)
 
@@ -96,18 +95,20 @@ class MessageCount(NamedTuple):
 
 def compose_blocks(
     message_counts: List[MessageCount],
-    channel_metas: List[ChannelMeta]
+    channel_metas: List[ChannelMeta],
+    max_n_channels: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
 
     total_messages = sum([mc.message_count for mc in message_counts])
     header_blocks = [
         {'type': 'header',
          'text': {'type': 'plain_text',
-                  'text': ":star2: Today's Active Channel Rankings :star2:"}},
+                  'text': ":star2: Daily Active Channel Rankings :star2:"}},
         {'type': 'context',
-         'elements': [{'text': (f'{total_messages} messages were posted to '
-                                'the workspace today.'),
-                       'type': 'mrkdwn'}]},
+         'elements': [{'text': (
+             f'Total {total_messages} messages in last 24 hr.\n'
+             f"{datetime.today().strftime('%Y-%m-%d (%a) %H:%M %Z')}"),
+             'type': 'mrkdwn'}]},
         {'type': 'divider'}
     ]
 
@@ -119,12 +120,18 @@ def compose_blocks(
 
 def compose_stat_blocks(
     message_counts: List[MessageCount],
-    channel_metas: List[ChannelMeta]
+    channel_metas: List[ChannelMeta],
+    max_n_channels: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
-    n_channels = len(message_counts)
     message_counts = sorted(message_counts.copy(),
                             key=lambda item: getattr(item, 'message_count'),
                             reverse=True)
+
+    # drop non-message channels and trim size
+    message_counts = [mc for mc in message_counts
+                      if mc.message_count > 0][:max_n_channels]
+
+    n_channels = len(message_counts)
 
     medals = [':first_place_medal:',
               ':second_place_medal:',
@@ -139,35 +146,34 @@ def compose_stat_blocks(
         channel_meta = [cm for cm in channel_metas if cm.id == channel_id][0]
         channel_name = channel_meta.name
         channel_members = channel_meta.num_members
-        channel_topic = channel_meta.topic_value
+        if (channel_topic := channel_meta.topic_value) != '':
+            channel_topic = f'*{channel_topic}*'
+
         channel_purpose = channel_meta.purpose_value
 
         stat_blocks.extend(
-            [
-                {
-                    'type': 'section', 'fields': [
-                        {
-                            "type": "mrkdwn", "text": f"{medal}  #{channel_name}"}, {
-                            'type': 'mrkdwn', 'text': (
-                                f':incoming_envelope: {num_message} :people_holding_hands: {channel_members}\n'
-                                f'{channel_topic}\n'
-                                f'{channel_purpose}')}]}, {
-                    "type": "divider"}])
+            [{'type': 'section', 'fields': [
+                {"type": "mrkdwn", "text": f"{medal}  #{channel_name}"},
+                {'type': 'mrkdwn', 'text': (
+                    f':speech_balloon: {num_message} '
+                    f':people_holding_hands: {channel_members} | '
+                    f'{channel_topic}\n{channel_purpose}')}]},
+             {"type": "divider"}])
 
     return stat_blocks
 
 
-def post_message(channel, client: WebClient, **kwargs):
+def post_message(channel_id, client: WebClient, **kwargs):
     try:
         # Call the chat.postMessage method using the WebClient
-        result = client.chat_postMessage(channel=channel, **kwargs)
+        result = client.chat_postMessage(channel=channel_id, **kwargs)
         logger.info(result)
     except SlackApiError as e:
         logger.error(f"Error posting message: {e}")
         raise RuntimeError
 
 
-def main(*args, **kwargs):
+def main():
     # get config
     config = configparser.ConfigParser()
     config.read(config_path)
@@ -227,15 +233,13 @@ def main(*args, **kwargs):
     message_blocks = compose_blocks(message_counts=message_counts,
                                     channel_metas=channel_metas)
 
-    pprint(message_blocks)
-    exit()
-    # pprint(blocks)
-    # post_message(
-    #     channel=hot_channel_id,
-
-    #     client=client,
-    #     blocks=blocks,
-    #     text='Hot channel ranking')
+    post_message(
+        channel_id=hot_channel_id,
+        client=client,
+        blocks=message_blocks,
+        username=config.get('bot appearance', 'username'),
+        icon_emoji=config.get('bot appearance', 'icon_emoji'),
+        text='Hot channel ranking')
 
 
 if __name__ == '__main__':
