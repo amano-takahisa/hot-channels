@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional
@@ -40,7 +41,7 @@ def get_channel_metas(client: WebClient) -> List[ChannelMeta]:
             exclude_archived=True, limit=1000, types="public_channel"
         )
         if result is None:
-             raise Exception
+            raise Exception
         channel_metas: List[ChannelMeta] = [
             ChannelMeta(
                 id=c["id"],
@@ -113,8 +114,9 @@ def compose_blocks(
             "elements": [
                 {
                     "text": (
-                        f"Total {total_messages} messages in last 24 hr. |"
-                        f"{datetime.today().strftime('%Y-%m-%d (%a) %H:%M %Z')}"
+                        f"Total {total_messages} messages in last 24 hr. | "
+                        f"{datetime.today().strftime('%Y-%m-%d (%a) %H:%M')} "
+                        f"{time.tzname[time.daylight]}"
                     ),
                     "type": "mrkdwn",
                 }
@@ -165,7 +167,7 @@ def compose_stat_blocks(
         channel_name = channel_meta.name
         channel_members = channel_meta.num_members
         if (channel_topic := channel_meta.topic_value) != "":
-            channel_topic = f"*{channel_topic}*"
+            channel_topic = f"Topic: {channel_topic}"
 
         channel_purpose = channel_meta.purpose_value
 
@@ -176,7 +178,9 @@ def compose_stat_blocks(
                     "fields": [
                         {
                             "type": "mrkdwn",
-                            "text": (f"{medal}  #{channel_name}\n" f"{channel_topic}"),
+                            "text": (
+                                f"{medal}  *#{channel_name}*\n" f"{channel_topic}"
+                            ),
                         },
                         {
                             "type": "mrkdwn",
@@ -275,8 +279,11 @@ def main():
     ]
 
     # compose block
+    max_n_channels = config.getint("ranking", "max_n_channels")
     message_blocks = compose_blocks(
-        message_counts=message_counts, channel_metas=channel_metas
+        message_counts=message_counts,
+        channel_metas=channel_metas,
+        max_n_channels=max_n_channels,
     )
 
     post_message(
