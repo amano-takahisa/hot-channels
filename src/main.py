@@ -6,7 +6,6 @@ import os
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
-from pprint import pprint
 from typing import Any, Dict, List, NamedTuple, Optional
 
 from slack_sdk.errors import SlackApiError
@@ -18,7 +17,7 @@ logger = logging.getLogger(__name__)
 # NON_HOT_CHANNELS = ['hot-channels', 'notification']
 
 # config_path = Path(__file__).joinpath('../config.ini')
-config_path = Path(__file__).parent.parent.joinpath('config.ini')
+config_path = Path(__file__).parent.parent.joinpath("config.ini")
 
 
 def get_slack_configs():
@@ -34,28 +33,30 @@ class ChannelMeta(NamedTuple):
     num_members: int
 
 
-def get_channel_metas(
-        client: WebClient) -> List[ChannelMeta]:
+def get_channel_metas(client: WebClient) -> List[ChannelMeta]:
     try:
         # Call the conversations.list method using the WebClient
         result = client.conversations_list(
-            exclude_archived=True,
-            limit=1000,
-            types='public_channel'
+            exclude_archived=True, limit=1000, types="public_channel"
         )
+        if result is None:
+             raise Exception
         channel_metas: List[ChannelMeta] = [
             ChannelMeta(
-                id=c['id'],
-                name=c['name'],
-                is_member=c['is_member'],
-                topic_value=c['topic']['value'],
-                purpose_value=c['purpose']['value'],
-                num_members=c['num_members'])
-            for c in result['channels'] if c['is_channel']]  # type: ignore
+                id=c["id"],
+                name=c["name"],
+                is_member=c["is_member"],
+                topic_value=c["topic"]["value"],
+                purpose_value=c["purpose"]["value"],
+                num_members=c["num_members"],
+            )
+            for c in result["channels"]
+            if c["is_channel"]
+        ]  # type: ignore
         return channel_metas
 
     except SlackApiError as e:
-        logger.error(f'Error fetching conversations: {e}')
+        logger.error(f"Error fetching conversations: {e}")
         raise RuntimeError
 
 
@@ -63,9 +64,7 @@ def join_to_channel(channel_id, client: WebClient):
     client.conversations_join(channel=channel_id)
 
 
-def get_number_of_messages_today(
-        channel_id: str,
-        client: WebClient) -> int:
+def get_number_of_messages_today(channel_id: str, client: WebClient) -> int:
     """
     Because pagination is not yet supported, 100 is returned if the number of
     messages is 100 or more.
@@ -77,10 +76,11 @@ def get_number_of_messages_today(
         # see: https://api.slack.com/methods/conversations.history$pagination
         # TODO: implement pagenation to get more than 100 messages per day
         result = client.conversations_history(channel=channel_id)
-        messages: List[Dict[str, Any]] = result.get('messages')  # type: ignore
+        messages: List[Dict[str, Any]] = result.get("messages")  # type: ignore
         ts_24h_ago = (datetime.today() - timedelta(days=1)).timestamp()
-        messages_last_24h = [message for message in messages
-                             if float(message['ts']) >= ts_24h_ago]
+        messages_last_24h = [
+            message for message in messages if float(message["ts"]) >= ts_24h_ago
+        ]
         return len(messages_last_24h)
 
     except SlackApiError as e:
@@ -101,20 +101,33 @@ def compose_blocks(
 
     total_messages = sum([mc.message_count for mc in message_counts])
     header_blocks = [
-        {'type': 'header',
-         'text': {'type': 'plain_text',
-                  'text': ":star2: Daily Active Channel Rankings :star2:"}},
-        {'type': 'context',
-         'elements': [{'text': (
-             f'Total {total_messages} messages in last 24 hr.\n'
-             f"{datetime.today().strftime('%Y-%m-%d (%a) %H:%M %Z')}"),
-             'type': 'mrkdwn'}]},
-        {'type': 'divider'}
+        {
+            "type": "header",
+            "text": {
+                "type": "plain_text",
+                "text": ":star2: Daily Hot Channel Rankings :star2:",
+            },
+        },
+        {
+            "type": "context",
+            "elements": [
+                {
+                    "text": (
+                        f"Total {total_messages} messages in last 24 hr. |"
+                        f"{datetime.today().strftime('%Y-%m-%d (%a) %H:%M %Z')}"
+                    ),
+                    "type": "mrkdwn",
+                }
+            ],
+        },
+        {"type": "divider"},
     ]
 
     stat_blocks = compose_stat_blocks(
         message_counts=message_counts,
-        channel_metas=channel_metas)
+        channel_metas=channel_metas,
+        max_n_channels=max_n_channels,
+    )
     return header_blocks + stat_blocks
 
 
@@ -123,20 +136,25 @@ def compose_stat_blocks(
     channel_metas: List[ChannelMeta],
     max_n_channels: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
-    message_counts = sorted(message_counts.copy(),
-                            key=lambda item: getattr(item, 'message_count'),
-                            reverse=True)
+    message_counts = sorted(
+        message_counts.copy(),
+        key=lambda item: getattr(item, "message_count"),
+        reverse=True,
+    )
 
     # drop non-message channels and trim size
-    message_counts = [mc for mc in message_counts
-                      if mc.message_count > 0][:max_n_channels]
+    message_counts = [mc for mc in message_counts if mc.message_count > 0][
+        :max_n_channels
+    ]
 
     n_channels = len(message_counts)
 
-    medals = [':first_place_medal:',
-              ':second_place_medal:',
-              ':third_place_medal:']
-    medals += [':tada:'] * (n_channels - len(medals))
+    medals = [
+        ":first_place_medal:",
+        ":second_place_medal:",
+        ":third_place_medal:",
+    ]
+    medals += [":tada:"] * (n_channels - len(medals))
     medals = medals[:n_channels]
 
     stat_blocks = []
@@ -146,19 +164,33 @@ def compose_stat_blocks(
         channel_meta = [cm for cm in channel_metas if cm.id == channel_id][0]
         channel_name = channel_meta.name
         channel_members = channel_meta.num_members
-        if (channel_topic := channel_meta.topic_value) != '':
-            channel_topic = f'*{channel_topic}*'
+        if (channel_topic := channel_meta.topic_value) != "":
+            channel_topic = f"*{channel_topic}*"
 
         channel_purpose = channel_meta.purpose_value
 
         stat_blocks.extend(
-            [{'type': 'section', 'fields': [
-                {"type": "mrkdwn", "text": f"{medal}  #{channel_name}"},
-                {'type': 'mrkdwn', 'text': (
-                    f':speech_balloon: {num_message} '
-                    f':people_holding_hands: {channel_members} | '
-                    f'{channel_topic}\n{channel_purpose}')}]},
-             {"type": "divider"}])
+            [
+                {
+                    "type": "section",
+                    "fields": [
+                        {
+                            "type": "mrkdwn",
+                            "text": (f"{medal}  #{channel_name}\n" f"{channel_topic}"),
+                        },
+                        {
+                            "type": "mrkdwn",
+                            "text": (
+                                f":speech_balloon: {num_message} "
+                                f":people_holding_hands: {channel_members}\n"
+                                f"{channel_purpose}"
+                            ),
+                        },
+                    ],
+                },
+                {"type": "divider"},
+            ]
+        )
 
     return stat_blocks
 
@@ -179,37 +211,46 @@ def main():
     config.read(config_path)
 
     # get channel metadatas
-    client = WebClient(token=os.environ['SLACK_API_TOKEN'])
+    client = WebClient(token=os.environ["SLACK_API_TOKEN"])
     channel_metas = get_channel_metas(client=client)
-    channel_name = config.get('channels', 'channel_name')
-    if channel_name not in [
-            channel_meta.name for channel_meta in channel_metas]:
+    channel_name = config.get("channels", "channel_name")
+    if channel_name not in [channel_meta.name for channel_meta in channel_metas]:
         raise RuntimeError(
-            f'Channel {channel_name} does not exist in your workspace. '
-            'Create the channel beforehand.')
+            f"Channel {channel_name} does not exist in your workspace. "
+            "Create the channel beforehand."
+        )
     hot_channel_id, is_bot_member_in_hot_channel = [
-        (channel_meta.id, channel_meta.is_member) for channel_meta
-        in channel_metas if channel_meta.name == channel_name][0]
+        (channel_meta.id, channel_meta.is_member)
+        for channel_meta in channel_metas
+        if channel_meta.name == channel_name
+    ][0]
 
     if is_bot_member_in_hot_channel is False:
-        logger.info('The bot joined to channel '
-                    f'"{config.get("channels", "channel_name")}"')
+        logger.info(
+            "The bot joined to channel " f'"{config.get("channels", "channel_name")}"'
+        )
         join_to_channel(channel_id=hot_channel_id, client=client)
 
     # Drop non_hot_channels
     channel_metas = [
-        channel_meta for channel_meta in channel_metas if channel_meta.name
-        not in config.get('channels', 'exclude_from_stat')]
+        channel_meta
+        for channel_meta in channel_metas
+        if channel_meta.name not in config.get("channels", "exclude_from_stat")
+    ]
 
     # Drop exclude_from_stat channels
     patterns = [
-        re.compile(p, re.UNICODE) for p
-        in json.loads(config.get('channels', 'exclude_from_stat'))]
-    channel_metas = [channel_meta for channel_meta in channel_metas if not any(
-        [re.fullmatch(pattern, channel_meta.name) for pattern in patterns])]
+        re.compile(p, re.UNICODE)
+        for p in json.loads(config.get("channels", "exclude_from_stat"))
+    ]
+    channel_metas = [
+        channel_meta
+        for channel_meta in channel_metas
+        if not any([re.fullmatch(pattern, channel_meta.name) for pattern in patterns])
+    ]
 
     # Join to public channels
-    if config.getboolean('channels', 'auto_join_to_public_channels'):
+    if config.getboolean("channels", "auto_join_to_public_channels"):
         # Join to non-member public channels
         for idx, channel_meta in enumerate(channel_metas):
             if not channel_meta.is_member:
@@ -219,28 +260,34 @@ def main():
     else:
         # Drop non-member channels
         channel_metas = [
-            channel_meta for channel_meta in channel_metas
-            if channel_meta.is_member]
+            channel_meta for channel_meta in channel_metas if channel_meta.is_member
+        ]
 
     # Get message counts
     message_counts: List[MessageCount] = [
-        MessageCount(channel_id=channel_meta.id,
-                     message_count=get_number_of_messages_today(
-                         channel_id=channel_meta.id, client=client))
-        for channel_meta in channel_metas]
+        MessageCount(
+            channel_id=channel_meta.id,
+            message_count=get_number_of_messages_today(
+                channel_id=channel_meta.id, client=client
+            ),
+        )
+        for channel_meta in channel_metas
+    ]
 
     # compose block
-    message_blocks = compose_blocks(message_counts=message_counts,
-                                    channel_metas=channel_metas)
+    message_blocks = compose_blocks(
+        message_counts=message_counts, channel_metas=channel_metas
+    )
 
     post_message(
         channel_id=hot_channel_id,
         client=client,
         blocks=message_blocks,
-        username=config.get('bot appearance', 'username'),
-        icon_emoji=config.get('bot appearance', 'icon_emoji'),
-        text='Hot channel ranking')
+        username=config.get("bot appearance", "username"),
+        icon_emoji=config.get("bot appearance", "icon_emoji"),
+        text="Hot channel ranking",
+    )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
